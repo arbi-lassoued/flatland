@@ -309,39 +309,74 @@ elif st.session_state.step == 2:
     st.markdown("---")
 
     # ── Lancement entraînement ────────────────────────────────────────────────
-    st.markdown("### ▶️ Lancer l'entraînement")
+    st.markdown("### ▶️ Générer les données & Lancer l'entraînement")
 
-    active_procs = st.session_state.training_procs
-    running = [a for a, p in active_procs.items() if p.poll() is None]
-    done_algos = st.session_state.training_done
+    # ── Option 1 : Générer données via FCN (rollouts réels) ──────────────────
+    with st.expander("🧠 **Option 1 — Générer des données avec le modèle FCN** (recommandé)", expanded=True):
+        st.markdown("""
+**Principe :** Le réseau FCN (**Input 231 → FC256 → FC256 → FC128 → Policy 5 actions**)
+joue des épisodes réels sur l'environnement Flatland.
+Les métriques (reward, taux d'arrivée, deadlocks) sont sauvegardées et visualisées à l'étape suivante.
+        """)
 
-    if running:
-        st.info(f"⏳ Entraînement en cours : {', '.join(running)}")
-        progress_cols = st.columns(len(running))
-        for i, algo in enumerate(running):
-            with progress_cols[i]:
-                df_live = load_metrics(algo.lower())
-                ep = len(df_live)
-                total = 50 if smoke else 500
-                pct = min(ep / total, 1.0)
-                st.markdown(f"**{algo}** — épisode {ep}/{total}")
-                st.progress(pct)
-        time.sleep(2)
-        st.rerun()
+        n_eps = st.slider("Nombre d'épisodes par algorithme", 10, 100, 40, step=10,
+                          key="n_eps_gen")
+        overwrite_data = st.checkbox("Écraser les données existantes", value=False, key="overwrite_chk")
 
-    # Mise à jour des terminés
-    newly_done = [a for a, p in active_procs.items()
-                  if p.poll() is not None and a not in done_algos]
-    for a in newly_done:
-        done_algos.add(a)
-    st.session_state.training_done = done_algos
+        if st.button("🚀 Générer avec le FCN", type="primary", use_container_width=True,
+                     key="btn_generate"):
+            from utils.generate_data import generate_for_algo
 
-    all_done = all(a in done_algos for a in algos)
+            for algo in algos:
+                st.markdown(f"**{ALGO_INFO[algo]['icon']} {algo}** — génération en cours…")
+                prog_bar = st.progress(0, text=f"{algo} — démarrage…")
 
-    col_exec, col_skip = st.columns([2, 1])
-    with col_exec:
-        if st.button("⚡ Exécuter l'entraînement", type="primary",
-                     use_container_width=True, disabled=bool(running)):
+                try:
+                    generate_for_algo(
+                        algo=algo.lower(),
+                        n_episodes=n_eps,
+                        n_agents=n_agents,
+                        overwrite=overwrite_data,
+                        streamlit_progress=lambda v, text="": prog_bar.progress(v, text=text),
+                    )
+                    prog_bar.progress(1.0, text=f"✅ {algo} terminé")
+                    st.success(f"✅ {algo} — {n_eps} épisodes générés")
+                except Exception as e:
+                    st.error(f"❌ {algo} — Erreur : {e}")
+
+            st.session_state.training_done = set(algos)
+            st.balloons()
+
+    st.markdown("---")
+
+    # ── Option 2 : Entraînement RLlib complet ────────────────────────────────
+    with st.expander("⚙️ Option 2 — Entraînement complet via RLlib (PPO/APEX/MARWIL)", expanded=False):
+        active_procs = st.session_state.training_procs
+        running = [a for a, p in active_procs.items() if p.poll() is None]
+        done_algos = st.session_state.training_done
+
+        if running:
+            st.info(f"⏳ En cours : {', '.join(running)}")
+            progress_cols = st.columns(len(running))
+            for i, algo in enumerate(running):
+                with progress_cols[i]:
+                    df_live = load_metrics(algo.lower())
+                    ep = len(df_live)
+                    total = 50 if smoke else 500
+                    pct = min(ep / total, 1.0)
+                    st.markdown(f"**{algo}** — épisode {ep}/{total}")
+                    st.progress(pct)
+            time.sleep(2)
+            st.rerun()
+
+        newly_done = [a for a, p in active_procs.items()
+                      if p.poll() is not None and a not in done_algos]
+        for a in newly_done:
+            done_algos.add(a)
+        st.session_state.training_done = done_algos
+
+        if st.button("⚡ Lancer l'entraînement RLlib", use_container_width=True,
+                     disabled=bool(running), key="btn_rllib"):
             for algo in algos:
                 cmd = [sys.executable, os.path.join(PROJECT_ROOT, "train.py"),
                        "--algorithm", algo.lower(), "--num-cpus", "4"]
@@ -352,26 +387,29 @@ elif st.session_state.step == 2:
                                         text=True, cwd=PROJECT_ROOT)
                 active_procs[algo] = proc
             st.session_state.training_procs = active_procs
-            st.success(f"Entraînement lancé : {', '.join(algos)}")
+            st.success(f"Entraînement RLlib lancé : {', '.join(algos)}")
             st.rerun()
 
-    with col_skip:
-        if st.button("Passer (données existantes) →", use_container_width=True):
-            st.session_state.step = 3
-            st.rerun()
+    done_algos = st.session_state.training_done
+    all_done = bool(done_algos) and all(a in done_algos for a in algos)
 
-    if all_done and done_algos:
-        st.success(f"✅ Entraînement terminé pour : {', '.join(done_algos)}")
+    if all_done:
+        st.success(f"✅ Données disponibles pour : {', '.join(done_algos)}")
         col_c = st.columns([2, 1, 2])[1]
         with col_c:
             if st.button("📊 Voir les résultats", type="primary", use_container_width=True):
                 st.session_state.step = 3
                 st.rerun()
 
-    col_prev = st.columns([1, 4])[0]
+    col_prev, col_skip_btn = st.columns([1, 1])
     with col_prev:
-        if st.button("← Retour", use_container_width=True):
+        if st.button("← Retour", use_container_width=True, key="btn_back_step2"):
             st.session_state.step = 1
+            st.rerun()
+    with col_skip_btn:
+        if st.button("Passer → Résultats (données existantes)", use_container_width=True,
+                     key="btn_skip_step2"):
+            st.session_state.step = 3
             st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
