@@ -37,10 +37,14 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
     Schedules (agent start/goal positions) are regenerated each reset.
     """
 
-    def __init__(self, config: dict = None):
+    def __init__(self, config: dict = None, n_agents_override: int = None):
         super().__init__()
         config = config or {}
         self._load_map_config(config)
+
+        # Permet de surcharger le nombre d'agents depuis l'interface
+        if n_agents_override is not None:
+            self.n_agents = int(n_agents_override)
 
         self._rail_generated = False
         self._prev_positions: dict = {}
