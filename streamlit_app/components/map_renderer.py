@@ -1,98 +1,80 @@
+"""
+map_renderer.py — Rendu officiel Flatland via RenderTool (PILSVG backend).
+Produit exactement la même carte visuelle que flatland.aicrowd.com.
+"""
 import io
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+from PIL import Image
+from flatland.utils.rendertools import RenderTool, AgentRenderVariant
 
+# Cache du renderer pour éviter de le recréer à chaque frame
+_renderer_cache: dict = {}
+
+# ── Palette de couleurs (gardée pour compatibilité) ──────────────────────────
 AGENT_COLORS = ["#E74C3C", "#3498DB", "#2ECC71", "#F39C12", "#9B59B6"]
 DIRECTION_ARROWS = {0: "↑", 1: "→", 2: "↓", 3: "←"}
 
 
-def render_flatland_streamlit(rail_env, agent_positions: dict = None, width: int = 600, height: int = 600) -> bytes:
+def render_flatland_streamlit(
+    rail_env,
+    agent_positions: dict = None,
+    width: int = 800,
+    height: int = 800,
+) -> bytes:
     """
-    Render the Flatland rail environment as a PNG image (bytes).
-    Returns raw bytes suitable for st.image().
+    Render the Flatland rail environment using the official RenderTool (PILSVG).
+    Returns raw PNG bytes suitable for st.image().
+    Produit exactement la même carte que flatland.aicrowd.com.
     """
-    dpi = 80
-    fig_w = width / dpi
-    fig_h = height / dpi
+    global _renderer_cache
 
-    env_h = rail_env.height
-    env_w = rail_env.width
+    env_id = id(rail_env)
 
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
-    ax.set_xlim(-0.5, env_w - 0.5)
-    ax.set_ylim(-0.5, env_h - 0.5)
-    ax.set_aspect("equal")
-    ax.set_facecolor("#ECF0F1")
-    ax.invert_yaxis()
+    # Crée ou réutilise le renderer pour cet environnement
+    if env_id not in _renderer_cache:
+        _renderer_cache.clear()
+        renderer = RenderTool(
+            rail_env,
+            gl="PILSVG",
+            agent_render_variant=AgentRenderVariant.AGENT_SHOWS_OPTIONS_AND_BOX,
+            show_debug=False,
+            clear_debug_text=True,
+            screen_width=width,
+            screen_height=height,
+        )
+        _renderer_cache[env_id] = renderer
+    else:
+        renderer = _renderer_cache[env_id]
+        renderer.reset()
 
-    ax.set_title("Flatland Railway Map (Carte Fixe — Seed 42)", fontsize=10, fontweight="bold", pad=6)
-    ax.tick_params(labelsize=6)
+    # Render
+    renderer.render_env(
+        show=False,
+        show_agents=True,
+        show_inactive_agents=True,
+        show_predictions=False,
+        selected_agent=None,
+    )
 
-    # Draw rail cells
-    for r in range(env_h):
-        for c in range(env_w):
-            cell = rail_env.rail.get_full_transitions(r, c)
-            if cell != 0:
-                ax.add_patch(mpatches.FancyBboxPatch(
-                    (c - 0.4, r - 0.4), 0.8, 0.8,
-                    boxstyle="round,pad=0.05",
-                    linewidth=0.3,
-                    edgecolor="#5D6D7E",
-                    facecolor="#BDC3C7",
-                    zorder=1,
-                ))
+    # Récupère l'image numpy RGBA (H, W, 4)
+    img_array = renderer.get_image()
 
-    # Draw agent targets (stars)
-    for i, agent in enumerate(rail_env.agents):
-        color = AGENT_COLORS[i % len(AGENT_COLORS)]
-        if agent.target is not None:
-            tr, tc = agent.target
-            ax.plot(tc, tr, marker="*", markersize=12, color=color,
-                    markeredgecolor="black", markeredgewidth=0.5, zorder=3, alpha=0.85)
-            ax.text(tc + 0.35, tr - 0.35, f"T{i}", fontsize=5.5,
-                    color=color, fontweight="bold", zorder=4)
-
-    # Draw agents
-    for i, agent in enumerate(rail_env.agents):
-        color = AGENT_COLORS[i % len(AGENT_COLORS)]
-        pos = None
-        direction = 0
-
-        if agent_positions and f"agent_{i}" in agent_positions:
-            info = agent_positions[f"agent_{i}"]
-            if info is not None:
-                pos = (info[0], info[1])
-                direction = info[2]
-        elif agent.position is not None:
-            pos = agent.position
-            direction = agent.direction
-
-        if pos is not None:
-            ar, ac = pos
-            circle = plt.Circle((ac, ar), 0.32, color=color, zorder=5,
-                                 ec="black", linewidth=0.8, alpha=0.9)
-            ax.add_patch(circle)
-            arrow = DIRECTION_ARROWS.get(direction, "?")
-            ax.text(ac, ar, f"{i}{arrow}", ha="center", va="center",
-                    fontsize=6.5, color="white", fontweight="bold", zorder=6)
-
-    # Legend
-    legend_patches = [
-        mpatches.Patch(color=AGENT_COLORS[i], label=f"Agent {i}") for i in range(len(rail_env.agents))
-    ]
-    legend_patches.append(mpatches.Patch(color="#BDC3C7", label="Rail"))
-    ax.legend(handles=legend_patches, loc="upper right", fontsize=6,
-              framealpha=0.85, ncol=2)
-
-    ax.grid(True, alpha=0.1, linewidth=0.3)
-    plt.tight_layout(pad=0.5)
+    # Convertit en PNG bytes
+    pil_img = Image.fromarray(img_array)
+    pil_img = pil_img.resize((width, height), Image.LANCZOS)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", dpi=dpi)
+    pil_img.save(buf, format="PNG")
     buf.seek(0)
-    img_bytes = buf.read()
-    plt.close(fig)
-    return img_bytes
+    return buf.read()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tout ce qui suit est MORT — remplacé par RenderTool officiel ci-dessus
+# ─────────────────────────────────────────────────────────────────────────────
+BG_COLOR        = "#0a0a0a"
+GRASS_COLOR     = "#1a2a1a"
+RAIL_BED_COLOR  = "#2c2c2c"
+RAIL_COLOR      = "#d0d0d0"
+RAIL_EDGE_COLOR = "#888888"
+DIRECTION_DX_DY = {0: (0, -1), 1: (1, 0), 2: (0, 1), 3: (-1, 0)}
