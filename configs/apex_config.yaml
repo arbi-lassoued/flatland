@@ -1,0 +1,13 @@
+algorithm: APEX
+framework: torch
+num_workers: 4
+train_batch_size: 512
+lr: 0.0001
+gamma: 0.99
+buffer_size: 50000
+learning_starts: 1000
+target_network_update_freq: 500
+rollout_fragment_length: 50
+stop:
+  timesteps_total: 2000000
+  episode_reward_mean: 45.0

@@ -1,0 +1,11 @@
+map:
+  width: 30
+  height: 30
+  seed: 42
+  number_of_agents: 5
+  max_num_cities: 5
+  grid_mode: false
+  max_rails_between_cities: 2
+  max_rails_in_city: 3
+  regenerate_rail_on_reset: false
+  regenerate_schedule_on_reset: true

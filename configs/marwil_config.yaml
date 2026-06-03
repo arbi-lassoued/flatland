@@ -1,0 +1,11 @@
+algorithm: MARWIL
+framework: torch
+num_workers: 2
+train_batch_size: 2000
+lr: 0.0003
+gamma: 0.99
+beta: 1.0
+input: ./results/ppo/demos
+stop:
+  timesteps_total: 1000000
+  episode_reward_mean: 40.0

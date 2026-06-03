@@ -1,0 +1,13 @@
+flatland-rl==3.0.15
+gym==0.26.2
+ray[rllib]==2.9.0
+torch==2.0.0
+numpy
+pyyaml
+tensorboard
+matplotlib
+pandas
+streamlit==1.32.0
+plotly==5.18.0
+Pillow
+watchdog

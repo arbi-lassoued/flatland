@@ -1,0 +1,16 @@
+algorithm: PPO
+framework: torch
+num_workers: 2
+train_batch_size: 4000
+sgd_minibatch_size: 256
+num_sgd_iter: 10
+lr: 0.0003
+clip_param: 0.2
+entropy_coeff: 0.01
+vf_loss_coeff: 0.5
+gamma: 0.99
+lambda: 0.95
+rollout_fragment_length: 200
+stop:
+  timesteps_total: 2000000
+  episode_reward_mean: 45.0
