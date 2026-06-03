@@ -14,24 +14,41 @@ def save_episode_metrics(
     arrivals: int,
     steps: int,
     deadlocks: int,
+    collisions: int = 0,
+    n_agents: int = 5,
+    reward_pos: float = None,
+    reward_neg: float = None,
 ) -> None:
     """Append one episode's metrics to results/{algo}/metrics.csv."""
     algo_dir = os.path.join(RESULTS_BASE, algo_name.lower())
     os.makedirs(algo_dir, exist_ok=True)
     csv_path = os.path.join(algo_dir, "metrics.csv")
 
+    # Calcul des composantes reward si non fournies
+    if reward_pos is None:
+        reward_pos = arrivals * 10.0
+    if reward_neg is None:
+        reward_neg = deadlocks * (-5.0) + collisions * (-2.0) + steps * n_agents * (-0.01)
+
     row = {
-        "episode": episode,
-        "reward": reward,
-        "arrivals": arrivals,
-        "steps": steps,
-        "deadlocks": deadlocks,
-        "arrival_rate": arrivals / 5.0,
+        "episode":      episode,
+        "reward":       round(reward, 2),
+        "reward_pos":   round(reward_pos, 2),
+        "reward_neg":   round(reward_neg, 2),
+        "arrivals":     arrivals,
+        "steps":        steps,
+        "deadlocks":    deadlocks,
+        "collisions":   collisions,
+        "arrival_rate": round(arrivals / max(n_agents, 1), 3),
     }
     df_new = pd.DataFrame([row])
 
     if os.path.exists(csv_path):
         df_existing = pd.read_csv(csv_path)
+        # Assure la compatibilité avec anciens CSV sans les nouvelles colonnes
+        for col in df_new.columns:
+            if col not in df_existing.columns:
+                df_existing[col] = 0.0
         df_combined = pd.concat([df_existing, df_new], ignore_index=True)
     else:
         df_combined = df_new
