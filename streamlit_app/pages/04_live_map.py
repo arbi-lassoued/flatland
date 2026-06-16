@@ -88,7 +88,7 @@ with col_map:
     map_slot = st.empty()
     positions = get_agent_positions(env.rail_env)
     img_bytes = render_flatland_streamlit(env.rail_env, positions, width=640, height=640)
-    map_slot.image(img_bytes, caption=f"Step {st.session_state.live_step_04}", use_column_width=True)
+    map_slot.image(img_bytes, caption=f"Step {st.session_state.live_step_04}", width=600)
 
 with col_panel:
     st.subheader("🚂 Agents")
@@ -145,7 +145,7 @@ if mode == "Manuel":
         # Refresh map
         positions = get_agent_positions(env.rail_env)
         img_bytes = render_flatland_streamlit(env.rail_env, positions, width=640, height=640)
-        map_slot.image(img_bytes, caption=f"Step {st.session_state.live_step_04}", use_column_width=True)
+        map_slot.image(img_bytes, caption=f"Step {st.session_state.live_step_04}", width=600)
         st.rerun()
 
 # ── Auto play (IA mode) ───────────────────────────────────────────────────────
@@ -202,7 +202,7 @@ elif mode == "Agent IA" and st.session_state.live_playing_04:
 
     positions = get_agent_positions(env.rail_env)
     img_bytes = render_flatland_streamlit(env.rail_env, positions, width=640, height=640)
-    map_slot.image(img_bytes, caption=f"Step {st.session_state.live_step_04}", use_column_width=True)
+    map_slot.image(img_bytes, caption=f"Step {st.session_state.live_step_04}", width=600)
 
     time.sleep(1.0 / speed)
     st.rerun()

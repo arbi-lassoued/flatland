@@ -97,7 +97,7 @@ try:
         st.session_state.eval_env_02 = FlatlandMultiAgentEnv()
         st.session_state.eval_env_02.reset()
     frame = st.session_state.eval_env_02.get_render_frame()
-    map_placeholder.image(frame, caption="État de la carte (statique sans checkpoint actif)", use_column_width=True)
+    map_placeholder.image(frame, caption="État de la carte (statique sans checkpoint actif)", width=500)
 except Exception as exc:
     map_placeholder.warning(f"Carte indisponible : {exc}")
 
@@ -140,4 +140,4 @@ gif_path = os.path.join(PROJECT_ROOT, "results", algo.lower(), "episode_eval.gif
 if os.path.exists(gif_path):
     st.subheader("🎬 GIF de l'épisode évalué")
     with open(gif_path, "rb") as f:
-        st.image(f.read(), caption="Episode GIF", use_column_width=False, width=400)
+        st.image(f.read(), caption="Episode GIF", width=400)

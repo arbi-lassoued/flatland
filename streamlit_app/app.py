@@ -159,7 +159,7 @@ if st.session_state.step == 0:
     col_img, col_txt = st.columns([1, 1], gap="large")
 
     with col_img:
-        st.image("https://i.imgur.com/9cNtWjs.gif", caption="Flatland — AICrowd", use_column_width=True)
+        st.image("https://i.imgur.com/9cNtWjs.gif", caption="Flatland — AICrowd", width=300)
 
     with col_txt:
         st.markdown("### 🎯 Objectif")
@@ -499,7 +499,7 @@ elif st.session_state.step == 2:
                         try:
                             img = render_flatland_streamlit(
                                 envs_local[algo].rail_env, width=380, height=380)
-                            maps[algo].image(img, use_column_width=True)
+                            maps[algo].image(img, width=400)
                         except Exception:
                             pass
 
