@@ -164,22 +164,23 @@ def main():
     rllib_cfg = build_rllib_config(algo, algo_cfg, smoke_test=args.smoke_test)
     stop = build_stop_criteria(algo_cfg, args.smoke_test)
 
-    local_dir = os.path.join(RESULTS_DIR, algo)
-    os.makedirs(local_dir, exist_ok=True)
+    # For Ray >=2.55, use storage_path instead of local_dir (local_dir is deprecated)
+    storage_path = os.path.join(RESULTS_DIR, algo)
+    os.makedirs(storage_path, exist_ok=True)
 
     algo_name_map = {"ppo": "PPO", "apex": "APEX", "marwil": "MARWIL"}
     rllib_algo_name = algo_name_map[algo]
 
     print(f"\n{'='*60}")
     print(f"  Training {rllib_algo_name} — {'SMOKE TEST' if args.smoke_test else 'FULL RUN'}")
-    print(f"  Results → {local_dir}")
+    print(f"  Results → {storage_path}")
     print(f"{'='*60}\n")
 
     results = tune.run(
         rllib_algo_name,
         config=rllib_cfg,
         stop=stop,
-        local_dir=local_dir,
+        storage_path=storage_path,
         checkpoint_freq=50 if not args.smoke_test else 1,
         checkpoint_at_end=True,
         verbose=1,

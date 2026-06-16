@@ -1,7 +1,7 @@
 import os
 import yaml
 import numpy as np
-import gym
+import gymnasium as gym
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 
 from flatland.envs.rail_env import RailEnv
@@ -50,13 +50,19 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
         self._prev_positions: dict = {}
         self._deadlock_counters: dict = {}
 
-        # Spaces
-        self.observation_space = gym.spaces.Box(
+        # Spaces (per-agent mappings required by newer RLlib env runners)
+        # Use ordered list of agent ids so RLlib sees consistent keys
+        self._agent_ids = [f"agent_{i}" for i in range(self.n_agents)]
+
+        single_obs_space = gym.spaces.Box(
             low=-1.0, high=1.0, shape=(OBS_SIZE,), dtype=np.float32
         )
-        self.action_space = gym.spaces.Discrete(N_ACTIONS)
+        single_act_space = gym.spaces.Discrete(N_ACTIONS)
 
-        self._agent_ids = {f"agent_{i}" for i in range(self.n_agents)}
+        # RLlib expects observation_space/action_space to be iterable/mapping for multi-agent
+        # Provide dict mapping agent_id -> space
+        self.observation_space = {agent_id: single_obs_space for agent_id in self._agent_ids}
+        self.action_space = {agent_id: single_act_space for agent_id in self._agent_ids}
 
         # Build the Flatland RailEnv
         self._build_rail_env()
@@ -83,6 +89,8 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
         self.grid_mode = bool(cfg.get("grid_mode", False))
         self.max_rails_between_cities = int(cfg.get("max_rails_between_cities", 2))
         self.max_rails_in_city = int(cfg.get("max_rails_in_city", 3))
+        # Episode length limit (used to set truncated flag)
+        self.max_steps = int(cfg.get("max_steps", 512))
 
     def _build_rail_env(self):
         tree_obs = TreeObsForRailEnv(
@@ -109,21 +117,26 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
 
     # ── MultiAgentEnv interface ───────────────────────────────────────────────
 
-    def reset(self):
+    def reset(self, *, seed=None, options=None):
+        """Gymnasium-style reset.
+
+        Accepts keyword-only seed and options. Returns a tuple (obs_dict, info_dict).
+        """
         if not self._rail_generated:
             raw_obs, _ = self.rail_env.reset(
                 regenerate_rail=True,
                 regenerate_schedule=True,
-                random_seed=self.seed,
+                random_seed=self.seed if seed is None else seed,
             )
             self._rail_generated = True
         else:
             raw_obs, _ = self.rail_env.reset(
                 regenerate_rail=False,
                 regenerate_schedule=True,
-                random_seed=None,
+                random_seed=seed,
             )
 
+        # Episode bookkeeping
         self._episode_arrivals = 0
         self._episode_deadlocks = 0
         self._episode_collisions = 0
@@ -132,10 +145,19 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
         self._prev_positions = {}
         self._deadlock_counters = {f"agent_{i}": 0 for i in range(self.n_agents)}
         self._arrived = {f"agent_{i}": False for i in range(self.n_agents)}
+        # Ensure the all-agents-arrived bonus is only given once per episode
+        self._all_arrived_bonus_given = False
 
-        return self._build_obs_dict(raw_obs)
+        obs = self._build_obs_dict(raw_obs)
+        info = {}
+        return obs, info
 
     def step(self, action_dict: dict):
+        """Step following gymnasium-style returns.
+
+        Returns: obs_dict, reward_dict, terminated_dict, truncated_dict, info_dict
+        """
+        # increment step counter
         self._episode_steps += 1
 
         # Map RLlib agent IDs → Flatland integer actions
@@ -148,7 +170,8 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
 
         obs_dict = self._build_obs_dict(raw_obs)
         reward_dict = {}
-        done_dict = {}
+        terminated_dict = {}
+        truncated_dict = {}
         info_dict = {}
 
         all_positions = {}
@@ -200,7 +223,15 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
             self._prev_positions[agent_id] = curr_pos
             self._cumulative_rewards[agent_id] += reward
             reward_dict[agent_id] = reward
-            done_dict[agent_id] = bool(dones[i])
+
+            # terminated: natural done (arrived or other end)
+            terminated = bool(dones[i])
+            terminated_dict[agent_id] = terminated
+
+            # truncated: time-limit exceeded
+            truncated = bool(self._episode_steps >= self.max_steps)
+            truncated_dict[agent_id] = truncated
+
             info_dict[agent_id] = {
                 "reward_breakdown": breakdown,
                 "cumulative_reward": self._cumulative_rewards[agent_id],
@@ -210,16 +241,21 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
                 "episode_steps": self._episode_steps,
             }
 
-        # All-agents-arrived bonus
-        if all(self._arrived.values()):
+        # All-agents-arrived bonus: give only once per episode
+        if all(self._arrived.values()) and not getattr(self, "_all_arrived_bonus_given", False):
             for agent_id in self._arrived:
                 reward_dict[agent_id] += REWARD_ALL_AGENTS_ARRIVED
                 info_dict[agent_id]["reward_breakdown"]["arrived"] += REWARD_ALL_AGENTS_ARRIVED
+            self._all_arrived_bonus_given = True
 
-        all_done = all(dones[i] for i in range(self.n_agents)) or dones.get("__all__", False)
-        done_dict["__all__"] = all_done
+        # __all__ flags
+        terminated_all = all(terminated_dict.get(f"agent_{i}", False) for i in range(self.n_agents))
+        truncated_all = all(truncated_dict.get(f"agent_{i}", False) for i in range(self.n_agents))
 
-        return obs_dict, reward_dict, done_dict, info_dict
+        terminated_dict["__all__"] = terminated_all
+        truncated_dict["__all__"] = truncated_all
+
+        return obs_dict, reward_dict, terminated_dict, truncated_dict, info_dict
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
