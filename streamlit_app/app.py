@@ -81,6 +81,15 @@ section[data-testid="stSidebar"] { display: none; }
     text-align: center; color: #aaa; font-size: 1.1rem; margin-bottom: 2rem;
 }
 
+/* Responsive hero image */
+.hero-image {
+    max-width: 900px;
+    width: 90%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+
 /* Winner badge */
 .winner-badge {
     background: linear-gradient(135deg, #f39c12, #e74c3c);
@@ -156,31 +165,47 @@ if st.session_state.step == 0:
     st.markdown('<div class="hero-title">🚂 Flatland RL</div>', unsafe_allow_html=True)
     st.markdown('<div class="hero-sub">Apprentissage par Renforcement Multi-Agent pour la gestion du trafic ferroviaire</div>', unsafe_allow_html=True)
 
-    col_img, col_txt = st.columns([1, 1], gap="large")
+    # Centered hero image (larger)
+    img_col_left, img_col_mid, img_col_right = st.columns([1, 2, 1], gap="large")
+    with img_col_mid:
+        # Use an HTML img tag with a responsive class so it stays centered even when the browser zoom changes
+        st.markdown(
+            "<div style='display:flex; justify-content:center;'>"
+            "<img src=\"https://i.imgur.com/9cNtWjs.gif\" class=\"hero-image\" alt=\"Flatland — AICrowd\">"
+            "</div>"
+            "<div style='text-align:center; color:#999; font-size:0.9rem; margin-top:6px;'>Flatland — AICrowd</div>",
+            unsafe_allow_html=True,
+        )
 
-    with col_img:
-        st.image("https://i.imgur.com/9cNtWjs.gif", caption="Flatland — AICrowd", width=300)
+    st.markdown("---")
 
-    with col_txt:
+    # Organize the home content into two rows with two columns each
+    # Row 1: Objective | Algorithms
+    row1_col1, row1_col2 = st.columns([1, 1], gap="large")
+    with row1_col1:
         st.markdown("### 🎯 Objectif")
         st.markdown("""
 Entraîner **5 agents autonomes** (trains) à naviguer sur un réseau ferroviaire
 en évitant les **collisions** et **deadlocks**, en temps réel.
+""")
 
----
-
-### 🧠 Algorithmes disponibles
-
+    with row1_col2:
+        st.markdown("### 🧠 Algorithmes disponibles")
+        st.markdown("""
 | Algo | Type | Points forts |
 |------|------|-------------|
 | 🟦 **PPO** | On-Policy | Stable, robust, idéal pour démarrer |
 | 🟥 **APEX** | Off-Policy distribué | Très rapide, multi-CPU |
 | 🟩 **MARWIL** | Imitation Learning | Apprend depuis des trajectoires |
+""")
 
----
+    st.markdown("---")
 
-### 🏆 Système de Récompenses
-
+    # Row 2: Reward system | Environment
+    row2_col1, row2_col2 = st.columns([1, 1], gap="large")
+    with row2_col1:
+        st.markdown("### 🏆 Système de Récompenses")
+        st.markdown("""
 | Événement | Reward |
 |-----------|--------|
 | 🎯 Arrivée d'un agent | **+10** |
@@ -188,13 +213,14 @@ en évitant les **collisions** et **deadlocks**, en temps réel.
 | 💀 Deadlock | **−5** |
 | 💥 Collision | **−2** |
 | ⏱️ Pénalité par step | **−0.01** |
+""")
 
----
-
-### 🗺️ Environnement
+    with row2_col2:
+        st.markdown("### 🗺️ Environnement")
+        st.markdown("""
 - Carte fixe `seed=42` · Grille **30×30**
 - **5 agents** avec départs/destinations différents
-        """)
+""")
 
     st.markdown("---")
     col_c = st.columns([2, 1, 2])[1]
