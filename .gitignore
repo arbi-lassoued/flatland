@@ -1,34 +1,39 @@
-# Python
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.egg-info/
-*.egg
-.eggs/
-dist/
-build/
-*.so
+*$py.class
 
-# Environments
-.env
-.venv
-env/
-venv/
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Editor directories and files
+.vscode/
+.idea/
+.DS_Store
 
 # Jupyter
-.ipynb_checkpoints/
+.ipynb_checkpoints
 
-# Results / checkpoints (large files)
-results/*/checkpoint_*/
-results/*/*.pkl
-results/*/*.h5
+# Logs
+*.log
 
-# Streamlit
+# Test / coverage
+.pytest_cache/
+coverage.xml
+
+# Results, checkpoints and generated artifacts
+results/
+
+# Streamlit cache
 .streamlit/
 
 # macOS
-.DS_Store
-
-# IDE
-.vscode/
-.idea/
-Flatland_5agents_capstone/
+.Spotlight-V100
+.Trashes
