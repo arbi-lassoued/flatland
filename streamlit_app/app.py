@@ -381,7 +381,13 @@ elif st.session_state.step == 2:
             for algo in algos:
                 env = FlatlandMultiAgentEnv(n_agents_override=n_agents)
                 env._rail_generated = False
-                obs_local[algo]  = env.reset()
+                # gymnasium.reset may return (obs, info)
+                reset_ret = env.reset()
+                if isinstance(reset_ret, tuple) or isinstance(reset_ret, list):
+                    obs_initial = reset_ret[0]
+                else:
+                    obs_initial = reset_ret
+                obs_local[algo]  = obs_initial
                 done_local[algo] = {"__all__": False}
                 envs_local[algo] = env
 
@@ -444,10 +450,37 @@ elif st.session_state.step == 2:
                             break
                         actions = {
                             aid: policies[algo].act(o, eps=eps)
-                            for aid, o in obs.items()
+                            for aid, o in (obs.items() if isinstance(obs, dict) else [])
                         }
+
                         result = env.step(actions)
-                        obs, rewards, done, *_ = result
+
+                        # env.step may return different tuples depending on gym/gymnasium
+                        # Expected variants:
+                        #  - (obs, rewards, done, info)
+                        #  - (obs, rewards, terminated, truncated, info)
+                        if isinstance(result, tuple) or isinstance(result, list):
+                            if len(result) == 5:
+                                obs, rewards, terminated, truncated, info = result
+                                # combine terminated and truncated into a single done dict
+                                done = {}
+                                if isinstance(terminated, dict):
+                                    done.update(terminated)
+                                else:
+                                    done['__all__'] = bool(terminated)
+                                if isinstance(truncated, dict):
+                                    for k, v in truncated.items():
+                                        done[k] = done.get(k, False) or bool(v)
+                                else:
+                                    done['__all__'] = done.get('__all__', False) or bool(truncated)
+                            elif len(result) >= 4:
+                                obs, rewards, done, info = result[0], result[1], result[2], result[3]
+                            else:
+                                # Fallback: expect (obs, rewards, done)
+                                obs, rewards, done = result
+                        else:
+                            # Unexpected return, try to use it directly
+                            obs, rewards, done = result
 
                         ep_steps[algo]    += 1
                         ep_reward[algo]   += sum(rewards.values())
