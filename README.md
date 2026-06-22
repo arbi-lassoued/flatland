@@ -48,6 +48,77 @@ python train.py --algorithm marwil --num-cpus 4
 python train.py --algorithm ppo --smoke-test
 ```
 
+## Commandes d'exécution (exemples rapides)
+
+Voici un bloc de commandes prêt à copier pour lancer l'environnement, le dashboard, l'entraînement, l'évaluation et la génération de dataset MARWIL. Ces exemples sont pour macOS / zsh et supposent un `venv` dans le dossier du projet.
+
+1) Créer et activer l'environnement virtuel
+
+```bash
+cd /path/to/flatland_5agents
+python3.13 -m venv .venv
+source .venv/bin/activate
+```
+
+2) Installer les dépendances
+
+```bash
+pip install -r requirements.txt
+pip install -e .
+```
+
+3) Lancer le dashboard Streamlit (port par défaut 8508)
+
+```bash
+source .venv/bin/activate
+streamlit run streamlit_app/app.py
+# Ouvrir http://localhost:8508
+```
+
+4) Entraînement (exemples)
+
+```bash
+# Entraînement complet PPO
+python train.py --algorithm ppo --num-cpus 4
+
+# Entraînement APEX (distribué)
+python train.py --algorithm apex --num-cpus 4
+
+# Entraînement MARWIL (offline) - nécessite dataset MARWIL généré
+python train.py --algorithm marwil --num-cpus 4
+
+# Smoke-test rapide (vérifie le flux d'entraînement)
+python train.py --algorithm ppo --smoke-test
+```
+
+5) Générer le dataset MARWIL (script générateur) — si disponible
+
+```bash
+# Exemple : générer 100 épisodes à partir d'un checkpoint PPO
+python generate_marwil_dataset.py --checkpoint results/ppo/<checkpoint> --episodes 100
+# Les fichiers seront écrits dans results/marwil_dataset/
+```
+
+6) Évaluation d'un checkpoint
+
+```bash
+python evaluate.py --algorithm ppo --checkpoint results/ppo/<checkpoint> --num-episodes 10
+```
+
+7) Visualiser les métriques dans TensorBoard
+
+```bash
+tensorboard --logdir ./results
+```
+
+Notes utiles
+- Les chemins de checkpoint `results/<algo>/` sont relatifs au répertoire racine du projet.
+- Pour un entraînement en arrière-plan (macOS / zsh), utilisez `nohup` ou `tmux` :
+  ```bash
+  nohup python train.py --algorithm ppo --num-cpus 4 &> train_ppo.log &
+  ```
+
+
 ## Evaluation
 
 ```bash
