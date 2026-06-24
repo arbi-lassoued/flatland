@@ -36,19 +36,41 @@ RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 # ── Callbacks ─────────────────────────────────────────────────────────────────
 
 class FlatlandCallbacks(DefaultCallbacks):
-    """Log per-episode metrics to CSV after each episode ends."""
+    """Log per-episode metrics to CSV after each episode ends (new API stack)."""
 
-    def on_episode_end(self, *, worker, base_env, policies, episode, **kwargs):
-        algo_name = episode.last_info_for().get("_algo_name", "unknown")
-        info = episode.last_info_for(agent_id=list(episode.agent_rewards.keys())[0])
-        arrivals = info.get("episode_arrivals", 0)
-        deadlocks = info.get("episode_deadlocks", 0)
-        steps = info.get("episode_steps", 1)
-        total_reward = sum(episode.agent_rewards.values())
+    _algo_name = "unknown"
 
-        ep_num = episode.episode_id
+    def on_episode_end(self, *, episode=None, env_runner=None, metrics_logger=None,
+                       env=None, env_index=None, rl_module=None, **kwargs):
+        # Recupere les stats depuis l env (FlatlandMultiAgentEnv)
+        try:
+            base_env = env.envs[0] if hasattr(env, "envs") else env
+            if hasattr(base_env, "unwrapped"):
+                base_env = base_env.unwrapped
+            stats = base_env.get_episode_stats() if hasattr(base_env, "get_episode_stats") else {}
+        except Exception:
+            stats = {}
+
+        arrivals = stats.get("arrivals", 0)
+        deadlocks = stats.get("deadlocks", 0)
+        collisions = stats.get("collisions", 0)
+        steps = stats.get("steps", 1)
+
+        # Recompense totale de l episode (somme sur tous les agents)
+        try:
+            total_reward = float(episode.get_return())
+        except Exception:
+            try:
+                total_reward = float(sum(
+                    ae.get_return() for ae in episode.agent_episodes.values()
+                ))
+            except Exception:
+                total_reward = 0.0
+
+        ep_num = getattr(episode, "id_", None) or getattr(episode, "episode_id", 0)
+
         save_episode_metrics(
-            algo_name=algo_name,
+            algo_name=self._algo_name,
             episode=ep_num,
             reward=total_reward,
             arrivals=arrivals,
@@ -94,7 +116,9 @@ def build_rllib_config(algo: str, algo_cfg: dict, smoke_test: bool = False) -> d
             "policies": {"shared_policy": shared_policy},
             "policy_mapping_fn": policy_mapping_fn,
         },
-        "callbacks": FlatlandCallbacks,
+        "callbacks": type("FlatlandCallbacks_" + algo.upper(),
+                          (FlatlandCallbacks,),
+                          {"_algo_name": algo.lower()}),
     }
 
     if smoke_test:
@@ -115,12 +139,12 @@ def build_rllib_config(algo: str, algo_cfg: dict, smoke_test: bool = False) -> d
             "lambda": algo_cfg.get("lambda", 0.95),
         })
 
-    elif algo_upper == "APEX":
+    elif algo_upper == "APPO":
+        # APPO = Asynchronous PPO (remplace APEX deprecated dans Ray 2.55)
+        base["num_env_runners"] = 1  # APPO: 1 worker async + 1 driver = 2 CPUs
         base.update({
-            "train_batch_size": algo_cfg.get("train_batch_size", 512) if not smoke_test else 200,
-            "buffer_size": algo_cfg.get("buffer_size", 50000) if not smoke_test else 1000,
-            "learning_starts": algo_cfg.get("learning_starts", 1000) if not smoke_test else 100,
-            "target_network_update_freq": algo_cfg.get("target_network_update_freq", 500),
+            "train_batch_size": algo_cfg.get("train_batch_size", 500) if not smoke_test else 200,
+            "vtrace": True,
         })
 
     elif algo_upper == "MARWIL":
@@ -167,7 +191,7 @@ def main():
     local_dir = os.path.join(RESULTS_DIR, algo)
     os.makedirs(local_dir, exist_ok=True)
 
-    algo_name_map = {"ppo": "PPO", "apex": "APEX", "marwil": "MARWIL"}
+    algo_name_map = {"ppo": "PPO", "apex": "APPO", "marwil": "MARWIL"}
     rllib_algo_name = algo_name_map[algo]
 
     print(f"\n{'='*60}")
@@ -179,7 +203,7 @@ def main():
         rllib_algo_name,
         config=rllib_cfg,
         stop=stop,
-        local_dir=local_dir,
+        storage_path=os.path.abspath(local_dir),
         checkpoint_freq=50 if not args.smoke_test else 1,
         checkpoint_at_end=True,
         verbose=1,

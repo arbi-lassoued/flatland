@@ -31,10 +31,10 @@ CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs"
 
 class FlatlandMultiAgentEnv(MultiAgentEnv):
     """
-    Multi-agent Flatland environment compatible with RLlib.
+    Multi-agent Flatland environment compatible with RLlib (gymnasium API).
 
-    The rail map is generated once (seed=42) and never changes between episodes.
-    Schedules (agent start/goal positions) are regenerated each reset.
+    The rail map is generated with a fixed seed (42) and stays identical
+    between episodes; schedules (agent start/goal) are regenerated each reset.
     """
 
     def __init__(self, config: dict = None, n_agents_override: int = None):
@@ -42,7 +42,6 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
         config = config or {}
         self._load_map_config(config)
 
-        # Permet de surcharger le nombre d'agents depuis l'interface
         if n_agents_override is not None:
             self.n_agents = int(n_agents_override)
 
@@ -50,21 +49,17 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
         self._prev_positions: dict = {}
         self._deadlock_counters: dict = {}
 
-        # Spaces (per-agent mappings required by newer RLlib env runners)
-        # Use ordered list of agent ids so RLlib sees consistent keys
-        self._agent_ids = [f"agent_{i}" for i in range(self.n_agents)]
+        # Spaces (gymnasium)
+        _obs = gym.spaces.Box(low=-1.0, high=1.0, shape=(OBS_SIZE,), dtype=np.float32)
+        _act = gym.spaces.Discrete(N_ACTIONS)
+        self.observation_space = gym.spaces.Dict({f"agent_{i}": _obs for i in range(self.n_agents)})
+        self.action_space = gym.spaces.Dict({f"agent_{i}": _act for i in range(self.n_agents)})
 
-        single_obs_space = gym.spaces.Box(
-            low=-1.0, high=1.0, shape=(OBS_SIZE,), dtype=np.float32
-        )
-        single_act_space = gym.spaces.Discrete(N_ACTIONS)
+        # Agent identifiers (RLlib new API stack requires agents / possible_agents)
+        self._agent_ids = {f"agent_{i}" for i in range(self.n_agents)}
+        self.possible_agents = [f"agent_{i}" for i in range(self.n_agents)]
+        self.agents = list(self.possible_agents)
 
-        # RLlib expects observation_space/action_space to be iterable/mapping for multi-agent
-        # Provide dict mapping agent_id -> space
-        self.observation_space = {agent_id: single_obs_space for agent_id in self._agent_ids}
-        self.action_space = {agent_id: single_act_space for agent_id in self._agent_ids}
-
-        # Build the Flatland RailEnv
         self._build_rail_env()
 
         # Episode tracking
@@ -72,7 +67,7 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
         self._episode_deadlocks = 0
         self._episode_collisions = 0
         self._episode_steps = 0
-        self._cumulative_rewards: dict = {f"agent_{i}": 0.0 for i in range(self.n_agents)}
+        self._cumulative_rewards = {f"agent_{i}": 0.0 for i in range(self.n_agents)}
 
     # ── Construction ─────────────────────────────────────────────────────────
 
@@ -89,8 +84,7 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
         self.grid_mode = bool(cfg.get("grid_mode", False))
         self.max_rails_between_cities = int(cfg.get("max_rails_between_cities", 2))
         self.max_rails_in_city = int(cfg.get("max_rails_in_city", 3))
-        # Episode length limit (used to set truncated flag)
-        self.max_steps = int(cfg.get("max_steps", 512))
+        self.max_steps = int(cfg.get("max_step", 512))
 
     def _build_rail_env(self):
         tree_obs = TreeObsForRailEnv(
@@ -115,28 +109,20 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
             obs_builder_object=tree_obs,
         )
 
-    # ── MultiAgentEnv interface ───────────────────────────────────────────────
+    # ── MultiAgentEnv interface (gymnasium) ───────────────────────────────────
 
     def reset(self, *, seed=None, options=None):
-        """Gymnasium-style reset.
+        if seed is not None:
+            self.seed = int(seed)
 
-        Accepts keyword-only seed and options. Returns a tuple (obs_dict, info_dict).
-        """
-        if not self._rail_generated:
-            raw_obs, _ = self.rail_env.reset(
-                regenerate_rail=True,
-                regenerate_schedule=True,
-                random_seed=self.seed if seed is None else seed,
-            )
-            self._rail_generated = True
-        else:
-            raw_obs, _ = self.rail_env.reset(
-                regenerate_rail=False,
-                regenerate_schedule=True,
-                random_seed=seed,
-            )
+        # Régénération complète à chaque épisode (carte figée car seed fixe)
+        raw_obs, _ = self.rail_env.reset(
+            regenerate_rail=True,
+            regenerate_schedule=True,
+            random_seed=self.seed,
+        )
+        self._rail_generated = True
 
-        # Episode bookkeeping
         self._episode_arrivals = 0
         self._episode_deadlocks = 0
         self._episode_collisions = 0
@@ -145,130 +131,106 @@ class FlatlandMultiAgentEnv(MultiAgentEnv):
         self._prev_positions = {}
         self._deadlock_counters = {f"agent_{i}": 0 for i in range(self.n_agents)}
         self._arrived = {f"agent_{i}": False for i in range(self.n_agents)}
-        # Ensure the all-agents-arrived bonus is only given once per episode
-        self._all_arrived_bonus_given = False
+        self._done_emitted = set()
 
-        obs = self._build_obs_dict(raw_obs)
-        info = {}
-        return obs, info
+        self.agents = list(self.possible_agents)
+
+        obs_dict = self._build_obs_dict(raw_obs)
+        info_dict = {agent_id: {} for agent_id in obs_dict}
+        return obs_dict, info_dict
 
     def step(self, action_dict: dict):
-        """Step following gymnasium-style returns.
-
-        Returns: obs_dict, reward_dict, terminated_dict, truncated_dict, info_dict
-        """
-        # increment step counter
         self._episode_steps += 1
+        if not hasattr(self, "_done_emitted"):
+            self._done_emitted = set()
 
-        # Map RLlib agent IDs → Flatland integer actions
+        # Actions Flatland (pour tous les agents internes, meme deja arrives)
         flatland_actions = {}
         for i in range(self.n_agents):
-            agent_id = f"agent_{i}"
-            flatland_actions[i] = int(action_dict.get(agent_id, 0))
+            aid = f"agent_{i}"
+            flatland_actions[i] = int(action_dict.get(aid, 0))
 
         raw_obs, raw_rewards, dones, infos = self.rail_env.step(flatland_actions)
 
-        obs_dict = self._build_obs_dict(raw_obs)
-        reward_dict = {}
-        terminated_dict = {}
-        truncated_dict = {}
-        info_dict = {}
-
+        # Positions pour la detection de collision
         all_positions = {}
         for i, agent in enumerate(self.rail_env.agents):
             if agent.position is not None:
-                pos_key = agent.position
-                all_positions.setdefault(pos_key, []).append(i)
+                all_positions.setdefault(agent.position, []).append(i)
 
+        active_obs, active_rew, term, truncd, active_info = {}, {}, {}, {}, {}
+        trunc = self._episode_steps >= self.max_steps
+
+        # On itere SEULEMENT sur les agents pas encore emis comme done
         for i in range(self.n_agents):
-            agent_id = f"agent_{i}"
+            aid = f"agent_{i}"
+            if aid in self._done_emitted:
+                continue
+
             agent = self.rail_env.agents[i]
-            breakdown = {
-                "arrived": 0.0,
-                "deadlock": 0.0,
-                "collision": 0.0,
-                "step_penalty": REWARD_STEP_PENALTY,
-                "cooperative": 0.0,
-                "invalid_action": 0.0,
-            }
-
             reward = REWARD_STEP_PENALTY
+            is_done_flat = bool(dones[i])
 
-            # Arrival
-            if dones[i] and not self._arrived[agent_id]:
-                self._arrived[agent_id] = True
+            # Arrivee (premiere fois seulement)
+            if is_done_flat and not self._arrived[aid]:
+                self._arrived[aid] = True
                 reward += REWARD_AGENT_ARRIVED
-                breakdown["arrived"] = REWARD_AGENT_ARRIVED
                 self._episode_arrivals += 1
 
-            # Deadlock detection: agent not done but stuck for several steps
+            # Deadlock
             curr_pos = agent.position
-            prev_pos = self._prev_positions.get(agent_id)
-            if not dones[i] and curr_pos is not None and curr_pos == prev_pos:
-                self._deadlock_counters[agent_id] = self._deadlock_counters.get(agent_id, 0) + 1
-                if self._deadlock_counters[agent_id] >= 5:
+            prev_pos = self._prev_positions.get(aid)
+            if not is_done_flat and curr_pos is not None and curr_pos == prev_pos:
+                self._deadlock_counters[aid] = self._deadlock_counters.get(aid, 0) + 1
+                if self._deadlock_counters[aid] >= 5:
                     reward += REWARD_DEADLOCK
-                    breakdown["deadlock"] = REWARD_DEADLOCK
                     self._episode_deadlocks += 1
-                    self._deadlock_counters[agent_id] = 0
+                    self._deadlock_counters[aid] = 0
             else:
-                self._deadlock_counters[agent_id] = 0
+                self._deadlock_counters[aid] = 0
 
-            # Collision detection
+            # Collision
             if curr_pos is not None and len(all_positions.get(curr_pos, [])) > 1:
                 reward += REWARD_COLLISION
-                breakdown["collision"] = REWARD_COLLISION
                 self._episode_collisions += 1
 
-            self._prev_positions[agent_id] = curr_pos
-            self._cumulative_rewards[agent_id] += reward
-            reward_dict[agent_id] = reward
+            self._prev_positions[aid] = curr_pos
+            self._cumulative_rewards[aid] += reward
 
-            # terminated: natural done (arrived or other end)
-            terminated = bool(dones[i])
-            terminated_dict[agent_id] = terminated
+            # Construction de l'obs uniquement pour les agents encore actifs
+            normed = normalize_observation(raw_obs.get(i, None), tree_depth=2, num_features_per_node=11)
+            active_obs[aid] = np.asarray(normed, dtype=np.float32)
+            active_rew[aid] = reward
+            term[aid] = is_done_flat
+            truncd[aid] = bool(trunc)
+            active_info[aid] = {}
 
-            # truncated: time-limit exceeded
-            truncated = bool(self._episode_steps >= self.max_steps)
-            truncated_dict[agent_id] = truncated
+            if is_done_flat or trunc:
+                self._done_emitted.add(aid)
 
-            info_dict[agent_id] = {
-                "reward_breakdown": breakdown,
-                "cumulative_reward": self._cumulative_rewards[agent_id],
-                "episode_arrivals": self._episode_arrivals,
-                "episode_deadlocks": self._episode_deadlocks,
-                "episode_collisions": self._episode_collisions,
-                "episode_steps": self._episode_steps,
-            }
+        # Bonus collectif (une seule fois)
+        if all(self._arrived.values()) and not getattr(self, "_all_bonus_given", False):
+            self._all_bonus_given = True
+            for aid in list(active_rew.keys()):
+                active_rew[aid] += REWARD_ALL_AGENTS_ARRIVED
 
-        # All-agents-arrived bonus: give only once per episode
-        if all(self._arrived.values()) and not getattr(self, "_all_arrived_bonus_given", False):
-            for agent_id in self._arrived:
-                reward_dict[agent_id] += REWARD_ALL_AGENTS_ARRIVED
-                info_dict[agent_id]["reward_breakdown"]["arrived"] += REWARD_ALL_AGENTS_ARRIVED
-            self._all_arrived_bonus_given = True
+        # Fin globale : tous emis OU dones["__all__"] OU truncated global
+        all_emitted = (len(self._done_emitted) == self.n_agents)
+        term["__all__"] = bool(all_emitted or dones.get("__all__", False))
+        truncd["__all__"] = bool(trunc)
 
-        # __all__ flags
-        terminated_all = all(terminated_dict.get(f"agent_{i}", False) for i in range(self.n_agents))
-        truncated_all = all(truncated_dict.get(f"agent_{i}", False) for i in range(self.n_agents))
-
-        terminated_dict["__all__"] = terminated_all
-        truncated_dict["__all__"] = truncated_all
-
-        return obs_dict, reward_dict, terminated_dict, truncated_dict, info_dict
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
+        return active_obs, active_rew, term, truncd, active_info
 
     def _build_obs_dict(self, raw_obs: dict) -> dict:
         obs_dict = {}
         for i in range(self.n_agents):
             agent_id = f"agent_{i}"
             agent_obs = raw_obs.get(i, None)
-            obs_dict[agent_id] = normalize_observation(agent_obs, tree_depth=2, num_features_per_node=11)
+            normed = normalize_observation(agent_obs, tree_depth=2, num_features_per_node=11)
+            obs_dict[agent_id] = np.asarray(normed, dtype=np.float32)
         return obs_dict
 
     def get_render_frame(self) -> np.ndarray:
-        """Return an RGB numpy array of the current map state."""
         from utils.render_utils import get_map_frame
         return get_map_frame(self.rail_env)
 
